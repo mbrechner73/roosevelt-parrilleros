@@ -1,0 +1,233 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Parrilleros Roosevelt Center</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="scene"><svg id="bld" viewBox="0 0 600 720" preserveAspectRatio="xMidYMax meet" role="img" aria-label="Fachada de las torres A y B con los 4 parrilleros en la base"></svg></div>
+  <main class="side">
+    <div class="top" id="top" hidden><span class="who"><strong id="uname"></strong><span id="uapt"></span></span>
+      <span class="who"><a id="adminLink" href="/admin.html" hidden>Administración</a><button class="link" id="salir">Salir</button></span></div>
+    <header>
+      <h1>Parrilleros del Roosevelt Center</h1>
+      <p class="lede" id="lede">Reservá uno de los 4 parrilleros con una seña. Podés cancelar sin costo hasta 24 horas antes del turno.</p>
+    </header>
+
+    <!-- ingreso / registro -->
+    <section class="card" id="vAuth" hidden>
+      <div class="tabs" role="tablist"><button role="tab" id="tLogin" aria-selected="true">Ingresar</button><button role="tab" id="tReg" aria-selected="false">Registrarme</button></div>
+      <form id="fLogin" class="card" style="padding:0;border:none;background:none">
+        <label>Email<input name="email" type="email" autocomplete="email" required></label>
+        <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
+        <button class="primary">Ingresar</button>
+        <p class="note">¿Olvidaste la contraseña? Pedile a la administración un enlace para crear una nueva.</p>
+        <p class="msg" aria-live="polite"></p>
+      </form>
+      <form id="fReg" class="card" style="padding:0;border:none;background:none" hidden>
+        <div class="row">
+          <label>Torre<select name="torre"><option value="A">Torre A</option><option value="B">Torre B</option></select></label>
+          <label>Piso<select name="piso"></select></label>
+          <label>Apto<select name="apto"></select></label>
+        </div>
+        <p class="note">También podés tocar tu ventana en la fachada.</p>
+        <div class="row2">
+          <label>Nombre y apellido<input name="nombre" autocomplete="name" required></label>
+          <label>Celular<input name="celular" type="tel" autocomplete="tel" placeholder="09X XXX XXX"></label>
+        </div>
+        <label>Email<input name="email" type="email" autocomplete="email" required></label>
+        <label>Contraseña (mínimo 8 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
+        <button class="primary">Crear cuenta</button>
+        <p class="note">La administración verifica que vivas en el apartamento antes de habilitarte para reservar.</p>
+        <p class="msg" aria-live="polite"></p>
+      </form>
+    </section>
+
+    <!-- cuenta pendiente -->
+    <section class="card" id="vEspera" hidden>
+      <h2>Tu cuenta está esperando aprobación</h2>
+      <p style="margin:0">La administración tiene que confirmar que vivís en el apartamento <strong id="esperaApt"></strong>. Cuando lo haga, vas a poder reservar desde esta misma página.</p>
+      <button id="recargar">Ya me aprobaron, volver a mirar</button>
+    </section>
+
+    <!-- reservas -->
+    <div id="vApp" hidden style="display:grid;gap:20px">
+      <section class="card" aria-labelledby="s2">
+        <h2 id="s2">Día y turno</h2>
+        <div class="days" id="days"></div>
+        <div class="row2" id="turnos"></div>
+        <h3>Parrillero</h3>
+        <div class="grills" id="grills"></div>
+        <div class="sum">
+          <div><div class="price" id="precio"></div><div class="note" id="resumen">Elegí un parrillero libre</div></div>
+          <button class="primary" id="go" disabled>Reservar y pagar</button>
+        </div>
+        <p class="msg" id="st" aria-live="polite"></p>
+      </section>
+      <section class="card" aria-labelledby="s3"><h2 id="s3">Mis reservas</h2><ul class="list" id="mine"></ul></section>
+      <section class="card" aria-labelledby="s4"><h2 id="s4">Agenda del día</h2><ul class="list" id="agenda"></ul></section>
+    </div>
+  </main>
+</div>
+
+<dialog id="conf"><div class="dlg">
+  <h2 id="ctit"></h2><p id="ctxt" style="margin:0"></p>
+  <div class="btns"><button type="button" id="cno">No, mantener</button><button class="primary" type="button" id="cyes">Sí, cancelar</button></div>
+</div></dialog>
+
+<script src="/edificio.js"></script>
+<script>
+{
+const $ = (id) => document.getElementById(id);
+const api = async (url, body) => {
+  const r = await fetch(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || 'Error de conexión');
+  return j;
+};
+const DIAS = ['dom','lun','mar','mié','jue','vie','sáb'], MESES = ['ene','feb','mar','abr','may','jun','jul','ago','set','oct','nov','dic'];
+const parse = (s) => { const [y, m, d] = s.split('-').map(Number); return new Date(Date.UTC(y, m - 1, d, 12)); };
+const fmt = (s) => { const d = parse(s); return DIAS[d.getUTCDay()] + ' ' + d.getUTCDate() + ' ' + MESES[d.getUTCMonth()]; };
+const sumDias = (f, n) => { const d = parse(f); d.setUTCDate(d.getUTCDate() + n); return d.toISOString().slice(0, 10); };
+const inicio = (f, t) => new Date(`${f}T${String(CFG.turnos[t].start).padStart(2, '0')}:00:00-03:00`).getTime();
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const msg = (el, t, cls) => { el.textContent = t; el.className = 'msg ' + (cls || ''); };
+
+let CFG, YO, ocupados = [], mias = [], dias = [];
+const st = { fecha: null, turno: 'noche', parr: null };
+const svg = $('bld');
+
+/* ---------- registro ---------- */
+const fReg = $('fReg');
+fReg.piso.innerHTML = Array.from({ length: 22 }, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('');
+function syncReg() {
+  const p = +fReg.piso.value, keep = fReg.apto.value || '1';
+  fReg.apto.innerHTML = [1, 2, 3, 4].map((u) => `<option value="${u}">${p * 100 + u}</option>`).join('');
+  fReg.apto.value = keep;
+  Edificio.marcar(svg, fReg.torre.value, p, +fReg.apto.value);
+}
+fReg.torre.onchange = fReg.piso.onchange = fReg.apto.onchange = syncReg;
+Edificio.dibujar(svg, (t, p, u) => { if ($('vAuth').hidden || fReg.hidden) return; fReg.torre.value = t; fReg.piso.value = p; fReg.apto.value = u; syncReg(); });
+syncReg();
+const tab = (reg) => { $('tLogin').setAttribute('aria-selected', !reg); $('tReg').setAttribute('aria-selected', reg); $('fLogin').hidden = reg; fReg.hidden = !reg; };
+$('tLogin').onclick = () => tab(false); $('tReg').onclick = () => tab(true);
+fReg.onsubmit = async (e) => {
+  e.preventDefault(); const m = fReg.querySelector('.msg');
+  const d = Object.fromEntries(new FormData(fReg)); d.piso = +d.piso; d.apto = +d.apto;
+  try { await api('/api/registro', d); await arrancar(); } catch (err) { msg(m, err.message, 'err'); }
+};
+$('fLogin').onsubmit = async (e) => {
+  e.preventDefault(); const f = e.target, m = f.querySelector('.msg');
+  try { await api('/api/login', { email: f.email.value, password: f.password.value }); f.reset(); await arrancar(); } catch (err) { msg(m, err.message, 'err'); }
+};
+$('salir').onclick = async () => { await api('/api/logout', {}).catch(() => {}); YO = null; mostrar(); };
+$('recargar').onclick = () => arrancar();
+
+/* ---------- reservas ---------- */
+const ocup = (f, t, p) => ocupados.find((o) => o.fecha === f && o.turno === t && o.parrillero === p);
+function renderDays() {
+  $('days').innerHTML = dias.map((f) => {
+    const d = parse(f), libres = Object.keys(CFG.turnos).reduce((a, t) => a + [1, 2, 3, 4].filter((p) => !ocup(f, t, p) && inicio(f, t) > Date.now()).length, 0);
+    return `<button class="day" data-f="${f}" aria-pressed="${f === st.fecha}" title="${libres} lugares libres"><small>${DIAS[d.getUTCDay()]}</small><b>${d.getUTCDate()}</b><small>${MESES[d.getUTCMonth()]}</small></button>`;
+  }).join('');
+}
+$('days').onclick = (e) => { const b = e.target.closest('.day'); if (!b) return; st.fecha = b.dataset.f; st.parr = null; render(); };
+function renderTurnos() {
+  $('turnos').innerHTML = Object.entries(CFG.turnos).map(([id, t]) => `<button class="seg" data-t="${id}" aria-pressed="${id === st.turno}"><span><strong>${t.n}</strong><br><small>${t.h}</small></span></button>`).join('');
+}
+$('turnos').onclick = (e) => { const b = e.target.closest('.seg'); if (!b) return; st.turno = b.dataset.t; st.parr = null; render(); };
+function renderGrills() {
+  const cerrado = inicio(st.fecha, st.turno) <= Date.now();
+  $('grills').innerHTML = [1, 2, 3, 4].map((p) => {
+    const o = ocup(st.fecha, st.turno, p), busy = !!o || cerrado;
+    const txt = cerrado ? 'cerrado' : o ? (o.estado === 'pendiente_pago' ? 'en pago' : 'Apto ' + o.apto) : 'libre';
+    return `<button class="g ${busy ? 'busy' : 'free'}" data-p="${p}" ${busy ? 'disabled' : ''} aria-pressed="${st.parr === p}"><b>${p}</b><small>${txt}</small></button>`;
+  }).join('');
+  Edificio.fuegos(svg, [1, 2, 3, 4].filter((p) => ocup(st.fecha, st.turno, p)));
+}
+$('grills').onclick = (e) => { const b = e.target.closest('.g'); if (!b || b.disabled) return; st.parr = +b.dataset.p; renderGrills(); renderSum(); };
+function renderSum() {
+  $('precio').textContent = '$ ' + CFG.sena;
+  $('resumen').textContent = st.parr ? `Parrillero ${st.parr} · ${fmt(st.fecha)} · ${CFG.turnos[st.turno].n}` : 'Elegí un parrillero libre';
+  $('go').disabled = !st.parr;
+}
+const li = (r, extra) => `<li><div><strong>${fmt(r.fecha)} · ${CFG.turnos[r.turno].n}</strong><br><span class="note">Parrillero ${r.parrillero} · Apto ${esc(r.apto)}</span></div>${extra}</li>`;
+function renderMine() {
+  const futuras = mias.filter((r) => r.inicio > Date.now());
+  $('mine').innerHTML = futuras.length ? futuras.map((r) => {
+    if (r.estado === 'pagada') return li(r, `<button class="cx" data-id="${r.id}" data-g="${r.gratis ? 1 : 0}">${r.gratis ? 'Cancelar sin costo' : 'Cancelar (sin reembolso)'}</button>`);
+    if (r.estado === 'pendiente_pago') return li(r, `<span class="tag warn">esperando pago</span><button class="cx" data-id="${r.id}" data-g="1">Descartar</button>`);
+    const rb = { 'reembolsado': 'seña devuelta', 'en trámite': 'reembolso en trámite', 'error': 'reembolso en revisión', 'no corresponde': 'sin reembolso' }[r.reembolso] || '';
+    return li(r, `<span class="tag x">cancelada${rb ? ' · ' + rb : ''}</span>`);
+  }).join('') : `<p class="empty">No tenés reservas próximas.</p>`;
+}
+function renderAgenda() {
+  const rows = ocupados.filter((o) => o.fecha === st.fecha && o.estado === 'pagada').sort((a, b) => a.turno.localeCompare(b.turno) || a.parrillero - b.parrillero);
+  $('agenda').innerHTML = rows.length ? rows.map((r) => li(r, '<span class="tag ok">reservado</span>')).join('') : `<p class="empty">Ningún parrillero reservado el ${fmt(st.fecha)}.</p>`;
+}
+function render() { renderDays(); renderTurnos(); renderGrills(); renderSum(); renderMine(); renderAgenda(); }
+async function cargar() {
+  const [a, b] = await Promise.all([api('/api/disponibilidad'), api('/api/mis-reservas')]);
+  ocupados = a.ocupados; mias = b.reservas; render();
+}
+$('go').onclick = async () => {
+  $('go').disabled = true; msg($('st'), 'Abriendo el pago…');
+  try { const r = await api('/api/reservas', { fecha: st.fecha, turno: st.turno, parrillero: st.parr }); location.href = r.pagoUrl; }
+  catch (e) { msg($('st'), e.message, 'err'); st.parr = null; await cargar().catch(() => {}); }
+};
+let pend = null;
+$('mine').onclick = (e) => {
+  const b = e.target.closest('.cx'); if (!b) return;
+  pend = mias.find((r) => r.id === +b.dataset.id); if (!pend) return;
+  if (pend.estado === 'pendiente_pago') { $('ctit').textContent = '¿Descartar esta reserva?'; $('ctxt').textContent = 'Todavía no se pagó. El parrillero queda libre para otros vecinos.'; }
+  else if (b.dataset.g === '1') { $('ctit').textContent = '¿Cancelar sin costo?'; $('ctxt').textContent = `Se libera el parrillero ${pend.parrillero} para el ${fmt(pend.fecha)} y se devuelven los $ ${pend.monto} al medio de pago que usaste.`; }
+  else { $('ctit').textContent = 'Cancelación fuera de plazo'; $('ctxt').textContent = `Faltan menos de ${CFG.horasCancelacion} horas para el turno. Podés liberar el parrillero, pero la seña de $ ${pend.monto} no se devuelve.`; }
+  $('conf').showModal();
+};
+$('cno').onclick = () => $('conf').close();
+$('cyes').onclick = async () => {
+  $('conf').close(); if (!pend) return;
+  try {
+    const r = await api(`/api/reservas/${pend.id}/cancelar`, {});
+    msg($('st'), { 'reembolsado': 'Reserva cancelada. La seña se devolvió a tu medio de pago.', 'error': 'Reserva cancelada. El reembolso quedó en revisión: la administración lo completa.', 'no corresponde': 'Reserva cancelada sin reembolso.' }[r.reembolso] || 'Reserva descartada.', 'ok');
+  } catch (e) { msg($('st'), e.message, 'err'); }
+  pend = null; cargar();
+};
+
+/* ---------- arranque ---------- */
+function mostrar() {
+  const activo = YO && YO.estado === 'activo';
+  $('vAuth').hidden = !!YO; $('vEspera').hidden = !(YO && !activo); $('vApp').hidden = !activo; $('top').hidden = !YO;
+  $('lede').textContent = `Reservá uno de los 4 parrilleros con una seña de $ ${CFG.sena}. Podés cancelar sin costo hasta ${CFG.horasCancelacion} horas antes del turno.`;
+  if (YO) {
+    $('uname').textContent = YO.nombre; $('uapt').textContent = YO.aptoLabel ? '· Apto ' + YO.aptoLabel : '';
+    $('adminLink').hidden = YO.rol !== 'admin'; $('esperaApt').textContent = YO.aptoLabel;
+    if (YO.torre) Edificio.marcar(svg, YO.torre, YO.piso, YO.apto);
+  } else syncReg();
+}
+async function arrancar() {
+  CFG = CFG || await api('/api/config');
+  dias = Array.from({ length: CFG.diasAdelante + 1 }, (_, i) => sumDias(CFG.hoy, i));
+  st.fecha = st.fecha || CFG.hoy;
+  YO = (await api('/api/yo')).usuario;
+  mostrar();
+  if (!YO || YO.estado !== 'activo') return;
+  const q = new URLSearchParams(location.search);
+  if (q.get('pago')) {
+    const pid = q.get('payment_id') || q.get('collection_id');
+    if (pid) await api('/api/mp/confirmar', { payment_id: pid }).catch(() => {});
+    msg($('st'), { ok: '¡Listo! Tu reserva quedó confirmada.', pendiente: 'El pago quedó pendiente. La reserva se confirma cuando se acredite.', error: 'El pago no se completó. El parrillero se libera en unos minutos si no lo pagás.' }[q.get('pago')] || '', q.get('pago') === 'ok' ? 'ok' : 'err');
+    history.replaceState(null, '', '/');
+  }
+  await cargar();
+}
+arrancar().catch((e) => { document.querySelector('.side').insertAdjacentHTML('beforeend', `<p class="msg err">${esc(e.message)}</p>`); });
+}
+</script>
+</body>
+</html>

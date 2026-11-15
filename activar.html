@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Activar cuenta · Parrilleros</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="scene"><svg id="bld" viewBox="0 0 600 720" preserveAspectRatio="xMidYMax meet" aria-hidden="true"></svg></div>
+  <main class="side">
+    <h1>Parrilleros del Roosevelt Center</h1>
+    <form class="card" id="f">
+      <h2 id="tit">Creá tu contraseña</h2>
+      <p id="info" style="margin:0" class="note"></p>
+      <label>Contraseña nueva (mínimo 8 caracteres)<input name="p1" type="password" autocomplete="new-password" minlength="8" required></label>
+      <label>Repetila<input name="p2" type="password" autocomplete="new-password" minlength="8" required></label>
+      <button class="primary">Guardar y entrar</button>
+      <p class="msg" id="m" aria-live="polite"></p>
+    </form>
+  </main>
+</div>
+<script src="/edificio.js"></script>
+<script>
+{
+const $ = (id) => document.getElementById(id), tok = location.hash.slice(1), m = $('m');
+const svg = $('bld'); Edificio.dibujar(svg);
+const err = (t) => { m.textContent = t; m.className = 'msg err'; };
+fetch('/api/enlace/' + encodeURIComponent(tok)).then((r) => r.json().then((j) => ({ ok: r.ok, j }))).then(({ ok, j }) => {
+  if (!ok) { err(j.error); $('f').querySelectorAll('input,button').forEach((x) => (x.disabled = true)); return; }
+  $('info').textContent = `${j.nombre} · ${j.email}${j.aptoLabel ? ' · Apto ' + j.aptoLabel : ''}`;
+  const a = j.aptoLabel.match(/^([AB])-(\d+)$/); if (a) { const n = +a[2]; Edificio.marcar(svg, a[1], Math.floor(n / 100), n % 100); }
+});
+$('f').onsubmit = async (e) => {
+  e.preventDefault(); const f = e.target;
+  if (f.p1.value !== f.p2.value) return err('Las contraseñas no coinciden');
+  const r = await fetch('/api/enlace/' + encodeURIComponent(tok), { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ password: f.p1.value }) });
+  const j = await r.json().catch(() => ({}));
+  if (!r.ok) return err(j.error || 'Error');
+  location.href = '/';
+};
+}
+</script>
+</body>
+</html>

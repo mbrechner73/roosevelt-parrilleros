@@ -1,0 +1,174 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Administración · Parrilleros</title>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;600;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="/app.css">
+<style>
+main{max-width:1100px;margin:0 auto;padding:clamp(20px,3vw,40px) max(4vw,16px);display:grid;gap:20px}
+.bar{display:flex;gap:10px;flex-wrap:wrap;align-items:end}.bar label{flex:1 1 180px}
+.acts{display:flex;gap:6px;flex-wrap:wrap}.acts button{min-height:36px;padding:4px 10px;font-size:14px}
+.share{display:grid;gap:8px;padding:12px;border:1px dashed var(--ember);border-radius:12px}
+.share input{font-size:14px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
+.kpi{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:12px 14px}.kpi b{display:block;font-size:28px;font-weight:800}
+</style>
+</head>
+<body>
+<main>
+  <div class="top"><a href="/">← Volver a reservas</a><button class="link" id="salir">Salir</button></div>
+  <h1>Administración de parrilleros</h1>
+  <div class="kpis" id="kpis"></div>
+  <div class="tabs" role="tablist">
+    <button role="tab" data-v="sol" aria-selected="true">Solicitudes</button>
+    <button role="tab" data-v="vec" aria-selected="false">Vecinos</button>
+    <button role="tab" data-v="res" aria-selected="false">Reservas</button>
+  </div>
+  <p class="msg" id="m" aria-live="polite"></p>
+
+  <section class="card" id="sol"><h2>Solicitudes de registro</h2><div id="solList"></div></section>
+
+  <section id="vec" hidden style="display:grid;gap:20px">
+    <form class="card" id="alta">
+      <h2>Dar de alta un vecino</h2>
+      <p class="note">Se genera un enlace para que el vecino cree su contraseña. Mandáselo por WhatsApp o email; vence en 14 días.</p>
+      <div class="row">
+        <label>Torre<select name="torre"><option>A</option><option>B</option></select></label>
+        <label>Piso<input name="piso" type="number" min="1" max="22" required></label>
+        <label>Apto (1 a 4)<input name="apto" type="number" min="1" max="4" required></label>
+      </div>
+      <div class="row">
+        <label>Nombre y apellido<input name="nombre" required></label>
+        <label>Email<input name="email" type="email" required></label>
+        <label>Celular<input name="celular" type="tel"></label>
+      </div>
+      <div class="btns"><button class="primary">Crear y obtener enlace</button></div>
+      <div id="altaShare"></div>
+    </form>
+    <div class="card">
+      <div class="bar"><h2 style="flex:1 1 100%">Vecinos registrados</h2><label>Buscar<input id="buscar" placeholder="Nombre, email o apto (ej. B-1203)"></label></div>
+      <div class="scroll"><table class="stack"><thead><tr><th>Apto</th><th>Nombre</th><th>Contacto</th><th>Estado</th><th></th></tr></thead><tbody id="vecList"></tbody></table></div>
+    </div>
+  </section>
+
+  <section class="card" id="res" hidden>
+    <div class="bar"><h2 style="flex:1 1 100%">Reservas</h2>
+      <label>Desde<input type="date" id="desde"></label>
+      <label>Mostrar<select id="filtro"><option value="pagada">Confirmadas</option><option value="cancelada">Canceladas</option><option value="">Todas</option></select></label></div>
+    <div class="scroll"><table class="stack"><thead><tr><th>Fecha</th><th>Turno</th><th class="num">Parr.</th><th>Apto</th><th>Vecino</th><th>Estado</th><th></th></tr></thead><tbody id="resList"></tbody></table></div>
+  </section>
+</main>
+
+<dialog id="conf"><div class="dlg"><h2 id="ctit"></h2><p id="ctxt" style="margin:0"></p>
+  <div class="btns"><button id="c0">Volver</button><button id="c1">Cancelar sin devolver</button><button class="primary" id="c2">Cancelar y devolver seña</button></div></div></dialog>
+
+<script>
+{
+const $ = (id) => document.getElementById(id);
+const api = async (url, body) => {
+  const r = await fetch(url, body === undefined ? {} : { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const j = await r.json().catch(() => ({}));
+  if (r.status === 401 || r.status === 403) { location.href = '/'; throw new Error(j.error); }
+  if (!r.ok) throw new Error(j.error || 'Error');
+  return j;
+};
+const esc = (s) => String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+const msg = (t, cls) => { $('m').textContent = t; $('m').className = 'msg ' + (cls || ''); };
+const TURNOS = { mediodia: 'Mediodía', noche: 'Noche' };
+const EST = { activo: ['ok', 'activo'], pendiente: ['warn', 'pendiente'], rechazado: ['bad', 'rechazado'], baja: ['x', 'dado de baja'] };
+let US = [], RS = [];
+
+document.querySelector('.tabs').onclick = (e) => {
+  const b = e.target.closest('[data-v]'); if (!b) return;
+  document.querySelectorAll('.tabs [data-v]').forEach((x) => { x.setAttribute('aria-selected', x === b); $(x.dataset.v).hidden = x !== b; });
+};
+$('salir').onclick = () => api('/api/logout', {}).finally(() => (location.href = '/'));
+
+const share = (url, u) => {
+  const txt = `Hola ${u.nombre}, este es tu enlace para activar la cuenta de reservas de parrilleros del Roosevelt Center: ${url}`;
+  return `<div class="share"><strong>Enlace para ${esc(u.nombre)}</strong><input readonly value="${esc(url)}" onclick="this.select()">
+  <div class="acts"><button type="button" data-copy="${esc(url)}">Copiar enlace</button><a class="btn" target="_blank" rel="noopener" href="https://wa.me/${(u.celular || '').replace(/\D/g, '').replace(/^0/, '598')}?text=${encodeURIComponent(txt)}">Enviar por WhatsApp</a></div></div>`;
+};
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-copy]'); if (!b) return;
+  try { await navigator.clipboard.writeText(b.dataset.copy); b.textContent = 'Copiado'; } catch { b.previousElementSibling?.select?.(); }
+});
+
+function kpis() {
+  const hoy = new Date().toISOString().slice(0, 10);
+  const conf = RS.filter((r) => r.estado === 'pagada' && r.fecha >= hoy).length;
+  const errs = RS.filter((r) => r.reembolso === 'error').length;
+  $('kpis').innerHTML = `<div class="kpi"><b>${US.filter((u) => u.estado === 'pendiente' && u.rol === 'vecino').length}</b>solicitudes pendientes</div>
+  <div class="kpi"><b>${US.filter((u) => u.estado === 'activo').length}</b>cuentas activas</div>
+  <div class="kpi"><b>${conf}</b>reservas próximas</div>
+  <div class="kpi"><b style="color:${errs ? 'var(--bad)' : 'inherit'}">${errs}</b>reembolsos a revisar</div>`;
+}
+function renderSol() {
+  const p = US.filter((u) => u.estado === 'pendiente' && u.rol === 'vecino');
+  $('solList').innerHTML = p.length ? `<ul class="list">${p.map((u) => `<li><div><strong>Apto ${esc(u.aptoLabel)} · ${esc(u.nombre)}</strong><br><span class="note">${esc(u.email)} · ${esc(u.celular || 'sin celular')} · ${esc(u.creado.slice(0, 10))}</span></div>
+    <div class="acts"><button data-est="rechazado" data-id="${u.id}">Rechazar</button><button class="primary" data-est="activo" data-id="${u.id}">Aprobar</button></div></li>`).join('')}</ul>`
+    : '<p class="empty">No hay solicitudes pendientes.</p>';
+}
+function renderVec() {
+  const t = $('buscar').value.trim().toLowerCase();
+  const l = US.filter((u) => !t || [u.nombre, u.email, u.aptoLabel, u.celular].join(' ').toLowerCase().includes(t));
+  $('vecList').innerHTML = l.map((u) => {
+    const [c, n] = EST[u.estado] || ['x', u.estado];
+    return `<tr><td data-l="Apto">${esc(u.aptoLabel || '—')}${u.rol === 'admin' ? ' <span class="tag x">admin</span>' : ''}</td><td data-l="Nombre">${esc(u.nombre)}</td>
+    <td data-l="Contacto">${esc(u.email)}<br><span class="note">${esc(u.celular)}</span></td><td data-l="Estado"><span class="tag ${c}">${n}</span>${u.invitado ? ' <span class="tag warn">sin contraseña aún</span>' : ''}</td>
+    <td><div class="acts"><button data-link="${u.id}">Enlace de contraseña</button>${u.estado === 'activo' ? `<button data-est="baja" data-id="${u.id}">Dar de baja</button>` : `<button data-est="activo" data-id="${u.id}">Activar</button>`}</div><div id="sh${u.id}"></div></td></tr>`;
+  }).join('') || '<tr><td colspan="5" class="empty">Sin resultados.</td></tr>';
+}
+function renderRes() {
+  const f = $('filtro').value;
+  const l = RS.filter((r) => (!f || r.estado === f) && r.fecha >= $('desde').value);
+  $('resList').innerHTML = l.map((r) => {
+    let est = r.estado === 'pagada' ? '<span class="tag ok">confirmada</span>' : r.estado === 'pendiente_pago' ? '<span class="tag warn">esperando pago</span>'
+      : `<span class="tag ${r.reembolso === 'error' ? 'bad' : 'x'}">cancelada · ${esc(r.reembolso || '')}</span><br><span class="note">por ${esc(r.cancelada_por || '')}</span>`;
+    const act = r.estado === 'pagada' ? `<button data-cancel="${r.id}">Cancelar</button>` : r.reembolso === 'error' ? `<button data-retry="${r.id}">Reintentar reembolso</button>` : '';
+    return `<tr><td data-l="Fecha">${r.fecha}</td><td data-l="Turno">${TURNOS[r.turno]}</td><td data-l="Parrillero" class="num">${r.parrillero}</td><td data-l="Apto">${esc(r.apto)}</td>
+    <td data-l="Vecino">${esc(r.nombre)}<br><span class="note">${esc(r.celular || r.email)}</span></td><td data-l="Estado">${est}</td><td>${act}</td></tr>`;
+  }).join('') || '<tr><td colspan="7" class="empty">No hay reservas con ese filtro.</td></tr>';
+}
+async function cargar() {
+  const [a, b] = await Promise.all([api('/api/admin/usuarios'), api('/api/admin/reservas?desde=' + $('desde').value)]);
+  US = a.usuarios; RS = b.reservas; kpis(); renderSol(); renderVec(); renderRes();
+}
+const d = new Date(); d.setDate(d.getDate() - 7); $('desde').value = d.toISOString().slice(0, 10);
+$('desde').onchange = cargar; $('filtro').onchange = renderRes; $('buscar').oninput = renderVec;
+
+document.addEventListener('click', async (e) => {
+  const b = e.target.closest('[data-est],[data-link],[data-cancel],[data-retry]'); if (!b) return;
+  try {
+    if (b.dataset.est) { await api('/api/admin/usuarios/' + b.dataset.id, { estado: b.dataset.est }); msg('Cambios guardados.', 'ok'); await cargar(); }
+    if (b.dataset.link) { const u = US.find((x) => x.id === +b.dataset.link); const r = await api(`/api/admin/usuarios/${u.id}/enlace`, {}); $('sh' + u.id).innerHTML = share(r.enlace, u); }
+    if (b.dataset.retry) { const r = await api(`/api/admin/reservas/${b.dataset.retry}/cancelar`, { reembolsar: true }); msg(r.reembolso === 'reembolsado' ? 'Reembolso hecho.' : 'El reembolso volvió a fallar. Revisalo en Mercado Pago.', r.reembolso === 'reembolsado' ? 'ok' : 'err'); await cargar(); }
+    if (b.dataset.cancel) {
+      const r = RS.find((x) => x.id === +b.dataset.cancel);
+      $('ctit').textContent = `Cancelar parrillero ${r.parrillero} · ${r.fecha} ${TURNOS[r.turno]}`;
+      $('ctxt').textContent = `Reserva del apto ${r.apto} (${r.nombre}). ${r.gratis ? 'Está dentro del plazo de cancelación gratuita.' : 'Ya pasó el plazo de cancelación gratuita.'}`;
+      $('conf').dataset.id = r.id; $('conf').showModal();
+    }
+  } catch (err) { msg(err.message, 'err'); }
+});
+$('c0').onclick = () => $('conf').close();
+const cancelar = async (reembolsar) => {
+  $('conf').close();
+  try { const r = await api(`/api/admin/reservas/${$('conf').dataset.id}/cancelar`, { reembolsar }); msg('Reserva cancelada' + (reembolsar ? (r.reembolso === 'reembolsado' ? ' y seña devuelta.' : '. El reembolso falló: reintentalo.') : ' sin reembolso.'), r.reembolso === 'error' ? 'err' : 'ok'); }
+  catch (err) { msg(err.message, 'err'); }
+  cargar();
+};
+$('c1').onclick = () => cancelar(false); $('c2').onclick = () => cancelar(true);
+
+$('alta').onsubmit = async (e) => {
+  e.preventDefault(); const f = e.target, dd = Object.fromEntries(new FormData(f)); dd.piso = +dd.piso; dd.apto = +dd.apto;
+  try { const r = await api('/api/admin/usuarios', dd); $('altaShare').innerHTML = share(r.enlace, dd); f.reset(); msg('Vecino creado. Mandale el enlace.', 'ok'); await cargar(); }
+  catch (err) { msg(err.message, 'err'); }
+};
+cargar().catch((e) => msg(e.message, 'err'));
+}
+</script>
+</body>
+</html>

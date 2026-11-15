@@ -1,0 +1,14 @@
+{
+  "name": "roosevelt-parrilleros",
+  "version": "1.0.0",
+  "description": "Reserva de parrilleros del Roosevelt Center (Punta del Este)",
+  "main": "server.js",
+  "type": "commonjs",
+  "engines": { "node": ">=22.5" },
+  "scripts": {
+    "start": "node --no-warnings server.js"
+  },
+  "dependencies": {
+    "express": "4.21.2"
+  }
+}
