@@ -266,11 +266,15 @@ app.get('/api/disponibilidad', wrap(async (req, res) => {
   res.json({ ocupados: rows });
 }));
 
-// --- mis reservas
+// --- reservas del apartamento (todas las cuentas del mismo apto las comparten)
+const aptoDe = (u) => (u.torre ? aptLabel(u.torre, u.piso, u.apto) : null);
 app.get('/api/mis-reservas', wrap(async (req, res) => {
   needUser(req); expirarPendientes();
-  const rows = q(`SELECT * FROM reservas WHERE usuario_id=? AND fecha>=? AND estado IN ('pagada','cancelada','pendiente_pago') ORDER BY fecha, turno`).all(req.user.id, sumDias(hoyUY(), -1));
-  res.json({ reservas: rows.map((r) => ({ ...r, gratis: gratis(r), inicio: inicioTurno(r.fecha, r.turno) })) });
+  const rows = q(`SELECT r.*, u.nombre AS reservo FROM reservas r JOIN usuarios u ON u.id=r.usuario_id
+    WHERE (r.apto=? OR r.usuario_id=?) AND r.fecha>=? AND r.estado IN ('pagada','cancelada','pendiente_pago') ORDER BY r.fecha, r.turno`)
+    .all(aptoDe(req.user), req.user.id, sumDias(hoyUY(), -1));
+  res.json({ reservas: rows.map((r) => ({ id: r.id, fecha: r.fecha, turno: r.turno, parrillero: r.parrillero, apto: r.apto, estado: r.estado, monto: r.monto,
+    reembolso: r.reembolso, propia: r.usuario_id === req.user.id, reservo: r.reservo, gratis: gratis(r), inicio: inicioTurno(r.fecha, r.turno) })) });
 }));
 
 // --- nueva reserva: retiene el lugar y devuelve el enlace de pago
@@ -337,7 +341,7 @@ app.post('/api/mp/confirmar', wrap(async (req, res) => {
 // --- cancelar (vecino)
 app.post('/api/reservas/:id/cancelar', wrap(async (req, res) => {
   needUser(req);
-  const r = q('SELECT * FROM reservas WHERE id=? AND usuario_id=?').get(+req.params.id, req.user.id);
+  const r = q('SELECT * FROM reservas WHERE id=? AND (usuario_id=? OR apto=?)').get(+req.params.id, req.user.id, aptoDe(req.user));
   if (!r) throw new Err(404, 'Reserva no encontrada');
   if (r.estado === 'pendiente_pago') { q(`UPDATE reservas SET estado='expirada' WHERE id=?`).run(r.id); return res.json({ reembolso: '' }); }
   if (r.estado !== 'pagada') throw new Err(409, 'La reserva ya no está activa');

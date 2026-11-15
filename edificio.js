@@ -34,6 +34,17 @@ window.Edificio = (() => {
     const w = svg.querySelector(`.w[data-t="${t}"][data-p="${p}"][data-u="${u}"]`);
     if (w) w.classList.add('sel');
   }
+  // pinta de naranja los apartamentos con reserva: lista de {apto:'B-1203', parrillero, turno}
+  function reservas(svg, lista) {
+    svg.querySelectorAll('.w.res').forEach((w) => { w.classList.remove('res'); w.querySelector('title').textContent = 'Apto ' + w.dataset.t + '-' + (w.dataset.p * 100 + +w.dataset.u); });
+    lista.forEach((r) => {
+      const m = String(r.apto).match(/^([AB])-(\d+)$/); if (!m) return;
+      const n = +m[2], w = svg.querySelector(`.w[data-t="${m[1]}"][data-p="${Math.floor(n / 100)}"][data-u="${n % 100}"]`);
+      if (!w) return;
+      w.classList.add('res');
+      const t = w.querySelector('title'); t.textContent += ` · parrillero ${r.parrillero}`;
+    });
+  }
   function fuegos(svg, ocupados) { svg.querySelectorAll('.fuego').forEach((f) => f.setAttribute('fill', ocupados.includes(+f.dataset.g) ? '#8a8a8a' : '#e4572e')); }
-  return { dibujar, marcar, fuegos, PISOS, APTOS };
+  return { dibujar, marcar, reservas, fuegos, PISOS, APTOS };
 })();

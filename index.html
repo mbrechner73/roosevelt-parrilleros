@@ -10,7 +10,8 @@
 </head>
 <body>
 <div class="wrap">
-  <div class="scene"><svg id="bld" viewBox="0 0 600 720" preserveAspectRatio="xMidYMax meet" role="img" aria-label="Fachada de las torres A y B con los 4 parrilleros en la base"></svg></div>
+  <div class="scene"><svg id="bld" viewBox="0 0 600 720" preserveAspectRatio="xMidYMax meet" role="img" aria-label="Fachada de las torres A y B con los 4 parrilleros en la base"></svg>
+    <div class="legend" id="legend" hidden><span><i class="r"></i><b id="legTxt">Con reserva</b></span><span><i class="s"></i>Tu apartamento</span></div></div>
   <main class="side">
     <div class="top" id="top" hidden><span class="who"><strong id="uname"></strong><span id="uapt"></span></span>
       <span class="who"><a id="adminLink" href="/admin.html" hidden>Administración</a><button class="link" id="salir">Salir</button></span></div>
@@ -51,7 +52,7 @@
         <label>Email<input name="email" type="email" autocomplete="email" required></label>
         <label>Contraseña (mínimo 8 caracteres)<input name="password" type="password" autocomplete="new-password" minlength="8" required></label>
         <button class="primary">Crear cuenta</button>
-        <p class="note">La administración verifica que vivas en el apartamento antes de habilitarte para reservar.</p>
+        <p class="note">Cada integrante del apartamento puede tener su propia cuenta; todas ven y manejan las reservas del apartamento. La administración verifica que vivas ahí antes de habilitarte para reservar.</p>
         <p class="msg" aria-live="polite"></p>
       </form>
     </section>
@@ -77,7 +78,7 @@
         </div>
         <p class="msg" id="st" aria-live="polite"></p>
       </section>
-      <section class="card" aria-labelledby="s3"><h2 id="s3">Mis reservas</h2><ul class="list" id="mine"></ul></section>
+      <section class="card" aria-labelledby="s3"><h2 id="s3">Reservas de mi apartamento</h2><ul class="list" id="mine"></ul></section>
       <section class="card" aria-labelledby="s4"><h2 id="s4">Agenda del día</h2><ul class="list" id="agenda"></ul></section>
     </div>
   </main>
@@ -169,6 +170,8 @@ function renderGrills() {
     return `<button class="g ${busy ? 'busy' : 'free'}" data-p="${p}" ${busy ? 'disabled' : ''} aria-pressed="${st.parr === p}"><b>${p}</b><small>${txt}</small></button>`;
   }).join('');
   Edificio.fuegos(svg, [1, 2, 3, 4].filter((p) => ocup(st.fecha, st.turno, p)));
+  Edificio.reservas(svg, ocupados.filter((o) => o.fecha === st.fecha && o.turno === st.turno && o.estado === 'pagada'));
+  $('legTxt').textContent = `Con reserva el ${fmt(st.fecha)} · ${CFG.turnos[st.turno].n.toLowerCase()}`;
 }
 $('grills').onclick = (e) => { const b = e.target.closest('.g'); if (!b || b.disabled) return; st.parr = +b.dataset.p; renderGrills(); renderSum(); };
 function renderSum() {
@@ -176,7 +179,7 @@ function renderSum() {
   $('resumen').textContent = st.parr ? `Parrillero ${st.parr} · ${fmt(st.fecha)} · ${CFG.turnos[st.turno].n}` : 'Elegí un parrillero libre';
   $('go').disabled = !st.parr;
 }
-const li = (r, extra) => `<li><div><strong>${fmt(r.fecha)} · ${CFG.turnos[r.turno].n}</strong><br><span class="note">Parrillero ${r.parrillero} · Apto ${esc(r.apto)}</span></div>${extra}</li>`;
+const li = (r, extra) => `<li><div><strong>${fmt(r.fecha)} · ${CFG.turnos[r.turno].n}</strong><br><span class="note">Parrillero ${r.parrillero} · Apto ${esc(r.apto)}${r.reservo && !r.propia ? ' · reservó ' + esc(r.reservo) : ''}</span></div>${extra}</li>`;
 function renderMine() {
   const futuras = mias.filter((r) => r.inicio > Date.now());
   $('mine').innerHTML = futuras.length ? futuras.map((r) => {
@@ -184,7 +187,7 @@ function renderMine() {
     if (r.estado === 'pendiente_pago') return li(r, `<span class="tag warn">esperando pago</span><button class="cx" data-id="${r.id}" data-g="1">Descartar</button>`);
     const rb = { 'reembolsado': 'seña devuelta', 'en trámite': 'reembolso en trámite', 'error': 'reembolso en revisión', 'no corresponde': 'sin reembolso' }[r.reembolso] || '';
     return li(r, `<span class="tag x">cancelada${rb ? ' · ' + rb : ''}</span>`);
-  }).join('') : `<p class="empty">No tenés reservas próximas.</p>`;
+  }).join('') : `<p class="empty">Tu apartamento no tiene reservas próximas.</p>`;
 }
 function renderAgenda() {
   const rows = ocupados.filter((o) => o.fecha === st.fecha && o.estado === 'pagada').sort((a, b) => a.turno.localeCompare(b.turno) || a.parrillero - b.parrillero);
@@ -222,7 +225,8 @@ $('cyes').onclick = async () => {
 /* ---------- arranque ---------- */
 function mostrar() {
   const activo = YO && YO.estado === 'activo';
-  $('vAuth').hidden = !!YO; $('vEspera').hidden = !(YO && !activo); $('vApp').hidden = !activo; $('top').hidden = !YO;
+  $('vAuth').hidden = !!YO; $('vEspera').hidden = !(YO && !activo); $('vApp').hidden = !activo; $('top').hidden = !YO; $('legend').hidden = !activo;
+  if (!activo) Edificio.reservas(svg, []);
   $('lede').textContent = `Reservá uno de los 4 parrilleros con una seña de $ ${CFG.sena}. Podés cancelar sin costo hasta ${CFG.horasCancelacion} horas antes del turno.`;
   if (YO) {
     $('uname').textContent = YO.nombre; $('uapt').textContent = YO.aptoLabel ? '· Apto ' + YO.aptoLabel : '';
