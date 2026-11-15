@@ -28,7 +28,10 @@ main{max-width:1100px;margin:0 auto;padding:clamp(20px,3vw,40px) max(4vw,16px);d
   </div>
   <p class="msg" id="m" aria-live="polite"></p>
 
-  <section class="card" id="sol"><h2>Solicitudes de registro</h2><div id="solList"></div></section>
+  <section id="sol" style="display:grid;gap:20px">
+    <div class="card"><h2>Solicitudes de registro</h2><div id="solList"></div></div>
+    <div class="card"><h2>Pedidos de recuperación de contraseña</h2><div id="recList"></div></div>
+  </section>
 
   <section id="vec" hidden style="display:grid;gap:20px">
     <form class="card" id="alta">
@@ -86,8 +89,9 @@ document.querySelector('.tabs').onclick = (e) => {
 };
 $('salir').onclick = () => api('/api/logout', {}).finally(() => (location.href = '/'));
 
-const share = (url, u) => {
-  const txt = `Hola ${u.nombre}, este es tu enlace para activar la cuenta de reservas de parrilleros del Roosevelt Center: ${url}`;
+const share = (url, u, rec) => {
+  const txt = rec ? `Hola ${u.nombre}, este es el enlace para crear una contraseña nueva en las reservas de parrilleros del Roosevelt Center: ${url}`
+    : `Hola ${u.nombre}, este es tu enlace para activar la cuenta de reservas de parrilleros del Roosevelt Center: ${url}`;
   return `<div class="share"><strong>Enlace para ${esc(u.nombre)}</strong><input readonly value="${esc(url)}" onclick="this.select()">
   <div class="acts"><button type="button" data-copy="${esc(url)}">Copiar enlace</button><a class="btn" target="_blank" rel="noopener" href="https://wa.me/${(u.celular || '').replace(/\D/g, '').replace(/^0/, '598')}?text=${encodeURIComponent(txt)}">Enviar por WhatsApp</a></div></div>`;
 };
@@ -100,7 +104,7 @@ function kpis() {
   const hoy = new Date().toISOString().slice(0, 10);
   const conf = RS.filter((r) => r.estado === 'pagada' && r.fecha >= hoy).length;
   const errs = RS.filter((r) => r.reembolso === 'error').length;
-  $('kpis').innerHTML = `<div class="kpi"><b>${US.filter((u) => u.estado === 'pendiente' && u.rol === 'vecino').length}</b>solicitudes pendientes</div>
+  $('kpis').innerHTML = `<div class="kpi"><b>${US.filter((u) => u.estado === 'pendiente' && u.rol === 'vecino').length + US.filter((u) => u.recuperoPedido).length}</b>solicitudes pendientes</div>
   <div class="kpi"><b>${US.filter((u) => u.estado === 'activo').length}</b>cuentas activas</div>
   <div class="kpi"><b>${conf}</b>reservas próximas</div>
   <div class="kpi"><b style="color:${errs ? 'var(--bad)' : 'inherit'}">${errs}</b>reembolsos a revisar</div>`;
@@ -110,6 +114,12 @@ function renderSol() {
   $('solList').innerHTML = p.length ? `<ul class="list">${p.map((u) => `<li><div><strong>Apto ${esc(u.aptoLabel)} · ${esc(u.nombre)}</strong><br><span class="note">${esc(u.email)} · ${esc(u.celular || 'sin celular')} · ${esc(u.creado.slice(0, 10))}</span></div>
     <div class="acts"><button data-est="rechazado" data-id="${u.id}">Rechazar</button><button class="primary" data-est="activo" data-id="${u.id}">Aprobar</button></div></li>`).join('')}</ul>`
     : '<p class="empty">No hay solicitudes pendientes.</p>';
+}
+function renderRec() {
+  const p = US.filter((u) => u.recuperoPedido);
+  $('recList').innerHTML = p.length ? `<ul class="list">${p.map((u) => `<li><div><strong>${esc(u.aptoLabel ? 'Apto ' + u.aptoLabel + ' · ' : '')}${esc(u.nombre)}</strong><br><span class="note">${esc(u.email)} · ${esc(u.celular || 'sin celular')} · pedido el ${esc(u.recuperoPedido.slice(0, 16).replace('T', ' '))}</span></div>
+    <div class="acts"><button class="primary" data-link="${u.id}" data-ctx="rec">Generar enlace</button></div><div id="shr${u.id}" style="flex-basis:100%"></div></li>`).join('')}</ul>`
+    : '<p class="empty">No hay pedidos de recuperación.</p>';
 }
 function renderVec() {
   const t = $('buscar').value.trim().toLowerCase();
@@ -134,7 +144,7 @@ function renderRes() {
 }
 async function cargar() {
   const [a, b] = await Promise.all([api('/api/admin/usuarios'), api('/api/admin/reservas?desde=' + $('desde').value)]);
-  US = a.usuarios; RS = b.reservas; kpis(); renderSol(); renderVec(); renderRes();
+  US = a.usuarios; RS = b.reservas; kpis(); renderSol(); renderRec(); renderVec(); renderRes();
 }
 const d = new Date(); d.setDate(d.getDate() - 7); $('desde').value = d.toISOString().slice(0, 10);
 $('desde').onchange = cargar; $('filtro').onchange = renderRes; $('buscar').oninput = renderVec;
@@ -143,7 +153,7 @@ document.addEventListener('click', async (e) => {
   const b = e.target.closest('[data-est],[data-link],[data-cancel],[data-retry]'); if (!b) return;
   try {
     if (b.dataset.est) { await api('/api/admin/usuarios/' + b.dataset.id, { estado: b.dataset.est }); msg('Cambios guardados.', 'ok'); await cargar(); }
-    if (b.dataset.link) { const u = US.find((x) => x.id === +b.dataset.link); const r = await api(`/api/admin/usuarios/${u.id}/enlace`, {}); $('sh' + u.id).innerHTML = share(r.enlace, u); }
+    if (b.dataset.link) { const u = US.find((x) => x.id === +b.dataset.link); const r = await api(`/api/admin/usuarios/${u.id}/enlace`, {}); $((b.dataset.ctx === 'rec' ? 'shr' : 'sh') + u.id).innerHTML = share(r.enlace, u, b.dataset.ctx === 'rec'); }
     if (b.dataset.retry) { const r = await api(`/api/admin/reservas/${b.dataset.retry}/cancelar`, { reembolsar: true }); msg(r.reembolso === 'reembolsado' ? 'Reembolso hecho.' : 'El reembolso volvió a fallar. Revisalo en Mercado Pago.', r.reembolso === 'reembolsado' ? 'ok' : 'err'); await cargar(); }
     if (b.dataset.cancel) {
       const r = RS.find((x) => x.id === +b.dataset.cancel);

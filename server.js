@@ -21,6 +21,10 @@ const CFG = {
   diasAdelante: +(process.env.DIAS_ADELANTE || 45),
   adminEmail: (process.env.ADMIN_EMAIL || '').toLowerCase().trim(),
   adminPassword: process.env.ADMIN_PASSWORD || '',
+  // envío de mails (opcional): Resend o Brevo. Sin ninguno, los pedidos de recuperación van al panel de administración.
+  resendKey: process.env.RESEND_API_KEY || '',
+  brevoKey: process.env.BREVO_API_KEY || '',
+  mailFrom: process.env.MAIL_FROM || '',            // ej.: Parrilleros Roosevelt <parrilleros@tudominio.uy>
 };
 const DEMO = !CFG.mpToken;
 const TORRES = ['A', 'B'], PISOS = 22, APTOS = 4, PARRILLEROS = [1, 2, 3, 4];
@@ -54,6 +58,7 @@ CREATE TABLE IF NOT EXISTS reservas(
   creada TEXT NOT NULL DEFAULT (datetime('now')), cancelada TEXT, cancelada_por TEXT);
 CREATE UNIQUE INDEX IF NOT EXISTS un_lugar ON reservas(fecha, turno, parrillero) WHERE estado IN ('pendiente_pago','pagada');
 `);
+if (!db.prepare('PRAGMA table_info(usuarios)').all().some((c) => c.name === 'recupero_pedido')) db.exec('ALTER TABLE usuarios ADD COLUMN recupero_pedido TEXT');
 const q = (sql) => db.prepare(sql);
 
 // ---------- utilidades ----------
@@ -76,7 +81,7 @@ function expirarPendientes() {
 }
 function publicUser(u) {
   return u && { id: u.id, email: u.email, nombre: u.nombre, celular: u.celular, torre: u.torre, piso: u.piso, apto: u.apto,
-    aptoLabel: u.torre ? aptLabel(u.torre, u.piso, u.apto) : '', rol: u.rol, estado: u.estado, creado: u.creado, invitado: !u.pass };
+    aptoLabel: u.torre ? aptLabel(u.torre, u.piso, u.apto) : '', rol: u.rol, estado: u.estado, creado: u.creado, invitado: !u.pass, recuperoPedido: u.recupero_pedido || null };
 }
 
 // administrador inicial
@@ -198,6 +203,44 @@ app.post('/api/login', wrap(async (req, res) => {
 }));
 app.post('/api/logout', (req, res) => { const t = readCookie(req, 'sid'); if (t) q('DELETE FROM sesiones WHERE token=?').run(t); res.clearCookie('sid', { path: '/' }); res.json({ ok: true }); });
 app.get('/api/yo', (req, res) => res.json({ usuario: publicUser(req.user) || null }));
+// ---------- recuperación de contraseña ----------
+const MAIL_ON = !!((CFG.resendKey || CFG.brevoKey) && CFG.mailFrom);
+async function enviarMail(to, nombre, asunto, html) {
+  if (CFG.resendKey) {
+    const r = await fetch('https://api.resend.com/emails', { method: 'POST', headers: { Authorization: 'Bearer ' + CFG.resendKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ from: CFG.mailFrom, to: [to], subject: asunto, html }) });
+    if (!r.ok) throw new Error('Resend ' + r.status + ' ' + (await r.text()));
+  } else {
+    const m = CFG.mailFrom.match(/^(.*)<(.+)>$/), from = m ? { name: m[1].trim(), email: m[2].trim() } : { email: CFG.mailFrom };
+    const r = await fetch('https://api.brevo.com/v3/smtp/email', { method: 'POST', headers: { 'api-key': CFG.brevoKey, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sender: from, to: [{ email: to, name: nombre }], subject: asunto, htmlContent: html }) });
+    if (!r.ok) throw new Error('Brevo ' + r.status + ' ' + (await r.text()));
+  }
+}
+const escHtml = (t) => String(t).replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
+app.get('/api/recuperar', (req, res) => res.json({ porMail: MAIL_ON }));
+app.post('/api/recuperar', wrap(async (req, res) => {
+  const e = String(req.body?.email || '').toLowerCase().trim();
+  frenar('rec:' + req.ip);
+  const u = okEmail(e) && q('SELECT * FROM usuarios WHERE email=?').get(e);
+  // la respuesta es siempre la misma, exista o no la cuenta
+  const resp = { ok: true, porMail: MAIL_ON };
+  if (!u || u.estado === 'rechazado' || u.estado === 'baja') return res.json(resp);
+  if (MAIL_ON) {
+    const tok = rnd(24);
+    q('UPDATE usuarios SET token=?, token_expira=? WHERE id=?').run(tok, now() + 3600e3, u.id);
+    const link = CFG.baseUrl + '/activar.html#' + tok;
+    try {
+      await enviarMail(u.email, u.nombre, 'Recuperar tu contraseña · Parrilleros Roosevelt Center',
+        `<p>Hola ${escHtml(u.nombre)},</p><p>Para crear una contraseña nueva entrá a este enlace (vale por 1 hora):</p><p><a href="${link}">${link}</a></p><p>Si no lo pediste, ignorá este mail.</p>`);
+      return res.json(resp);
+    } catch (err) { console.error('Mail falló', err.message); }
+  }
+  // sin mail (o si el envío falló) el pedido queda en el panel de administración
+  q("UPDATE usuarios SET recupero_pedido=datetime('now','-3 hours') WHERE id=?").run(u.id);
+  res.json(resp);
+}));
+
 // activar cuenta / cambiar contraseña con el enlace que genera la administración
 app.get('/api/enlace/:token', wrap(async (req, res) => {
   const u = q('SELECT * FROM usuarios WHERE token=? AND token_expira>?').get(req.params.token, now());
@@ -209,7 +252,7 @@ app.post('/api/enlace/:token', wrap(async (req, res) => {
   if (!u) throw new Err(404, 'El enlace venció o ya fue usado. Pedí uno nuevo a la administración.');
   const p = String(req.body?.password || '');
   if (p.length < 8) throw new Err(400, 'La contraseña debe tener al menos 8 caracteres');
-  q(`UPDATE usuarios SET pass=?, token=NULL, token_expira=NULL WHERE id=?`).run(hashPass(p), u.id);
+  q(`UPDATE usuarios SET pass=?, token=NULL, token_expira=NULL, recupero_pedido=NULL WHERE id=?`).run(hashPass(p), u.id);
   q('DELETE FROM sesiones WHERE usuario_id=?').run(u.id);
   login(res, q('SELECT * FROM usuarios WHERE id=?').get(u.id));
   res.json({ ok: true });

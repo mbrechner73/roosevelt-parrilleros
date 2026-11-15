@@ -26,8 +26,16 @@
         <label>Email<input name="email" type="email" autocomplete="email" required></label>
         <label>Contraseña<input name="password" type="password" autocomplete="current-password" required></label>
         <button class="primary">Ingresar</button>
-        <p class="note">¿Olvidaste la contraseña? Pedile a la administración un enlace para crear una nueva.</p>
+        <button type="button" class="link" id="olvide" style="justify-self:start">¿Olvidaste tu contraseña?</button>
         <p class="msg" aria-live="polite"></p>
+      </form>
+      <form id="fRec" class="card" style="padding:0;border:none;background:none" hidden>
+        <h2>Recuperar contraseña</h2>
+        <p class="note" style="font-size:15px">Escribí el email con el que te registraste.</p>
+        <label>Email<input name="email" type="email" autocomplete="email" required></label>
+        <button class="primary">Recuperar</button>
+        <p class="msg" aria-live="polite"></p>
+        <button type="button" class="link" id="volverLogin" style="justify-self:start">Volver a ingresar</button>
       </form>
       <form id="fReg" class="card" style="padding:0;border:none;background:none" hidden>
         <div class="row">
@@ -114,7 +122,19 @@ function syncReg() {
 fReg.torre.onchange = fReg.piso.onchange = fReg.apto.onchange = syncReg;
 Edificio.dibujar(svg, (t, p, u) => { if ($('vAuth').hidden || fReg.hidden) return; fReg.torre.value = t; fReg.piso.value = p; fReg.apto.value = u; syncReg(); });
 syncReg();
-const tab = (reg) => { $('tLogin').setAttribute('aria-selected', !reg); $('tReg').setAttribute('aria-selected', reg); $('fLogin').hidden = reg; fReg.hidden = !reg; };
+const tab = (reg) => { $('tLogin').setAttribute('aria-selected', !reg); $('tReg').setAttribute('aria-selected', reg); $('fLogin').hidden = reg; fReg.hidden = !reg; $('fRec').hidden = true; };
+$('olvide').onclick = () => { $('fLogin').hidden = true; $('fRec').hidden = false; $('fRec').email.value = $('fLogin').email.value; msg($('fRec').querySelector('.msg'), ''); $('fRec').email.focus(); };
+$('volverLogin').onclick = () => tab(false);
+$('fRec').onsubmit = async (e) => {
+  e.preventDefault(); const f = e.target, m = f.querySelector('.msg'), b = f.querySelector('button.primary');
+  b.disabled = true;
+  try {
+    const r = await api('/api/recuperar', { email: f.email.value });
+    msg(m, r.porMail ? 'Si el email está registrado, te mandamos un enlace para crear una contraseña nueva. Revisá también el correo no deseado. El enlace vale por 1 hora.'
+      : 'Listo. Si el email está registrado, la administración va a recibir tu pedido y te va a mandar un enlace por WhatsApp o mail para crear una contraseña nueva.', 'ok');
+  } catch (err) { msg(m, err.message, 'err'); }
+  b.disabled = false;
+};
 $('tLogin').onclick = () => tab(false); $('tReg').onclick = () => tab(true);
 fReg.onsubmit = async (e) => {
   e.preventDefault(); const m = fReg.querySelector('.msg');

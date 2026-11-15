@@ -46,6 +46,19 @@ Para probarlo en una computadora: `npm install`, copiar `.env.example` como `.en
 - Para probar antes de cobrar de verdad se pueden usar las credenciales y tarjetas de prueba de Mercado Pago.
 - Mientras `MP_ACCESS_TOKEN` esté vacío, la app funciona en **modo demostración**: el pago es un botón "Simular pago aprobado" y no se cobra nada.
 
+## Recuperación de contraseña
+
+En la pantalla de ingreso está "¿Olvidaste tu contraseña?". El vecino pone su email y:
+
+- **Sin servicio de mails configurado** (como viene): el pedido aparece en Administración → Solicitudes → *Pedidos de recuperación*. La administración aprieta *Generar enlace* y se lo manda por WhatsApp.
+- **Con servicio de mails**: le llega un mail con un enlace que vale 1 hora. Si el envío falla, el pedido igual queda en el panel.
+
+Para activar los mails, crear una cuenta gratis en Resend (resend.com) o Brevo (brevo.com), verificar el remitente y cargar estas variables:
+- `RESEND_API_KEY` (o `BREVO_API_KEY`)
+- `MAIL_FROM`, por ejemplo `Parrilleros Roosevelt <parrilleros@tudominio.uy>`
+
+La administración también puede generar un enlace en cualquier momento desde la pestaña *Vecinos*.
+
 ## Cambiar reglas
 
 Variables opcionales: `SENA`, `HORAS_CANCELACION`, `MINUTOS_RETENCION`, `MAX_RESERVAS_ACTIVAS_POR_APTO`, `DIAS_ADELANTE`.
